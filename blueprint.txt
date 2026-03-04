@@ -1,0 +1,278 @@
+================================================================================
+BLUEPRINT ULTIMATE FULL VERSION: SAAS PEMERINTAHAN (PHP & POSTGRESQL)
+================================================================================
+
+================================================================================
+0. INFRASTRUKTUR & DEVOPS (LAPISAN KEAMANAN TERLUAR SERVER)
+================================================================================
+infra/
+├─ nginx/
+│  ├─ waf.conf                 ← Web Application Firewall: Aturan blokir bot jahat & payload SQLi/XSS.
+│  ├─ ddos_protect.conf        ← Rate limiting di level server (membatasi jumlah koneksi per detik per IP).
+│  └─ ssl_tls13.conf           ← Memaksa penggunaan HTTPS (TLS 1.3) dan cipher suite kriptografi modern.
+├─ postgresql/
+│  ├─ pg_hba.conf              ← Segregasi jaringan: Memastikan DB hanya bisa diakses oleh IP server aplikasi.
+│  └─ row_level_security.sql   ← Script RLS PostgreSQL sebagai pengaman lapis dua di bawah isolasi Schema.
+└─ ci-cd/
+   └─ security_scan.yml        ← Pipeline analisis kode statis (SAST) sebelum rilis ke server.
+
+
+================================================================================
+1. CORE (OTAK UTAMA, ROUTER SENTRAL, PUSAT IDENTITAS & KEAMANAN)
+================================================================================
+core/
+│
+├─ public/                     ← SATU-SATUNYA TITIK MASUK PUBLIK (DOCUMENT ROOT)
+│  ├─ index.php                ← FRONT CONTROLLER: Menangkap semua request masuk.
+│  ├─ .htaccess / nginx.conf   ← Mengunci akses folder root, me-redirect semua URL ke index.php.
+│  └─ assets/                  ← ASET STATIS GLOBAL
+│     ├─ css/
+│     │  ├─ bootstrap.min.css  ← Framework styling utama.
+│     │  ├─ global.css         ← Style utama anti-bentrok antar tenant.
+│     │  ├─ prov_theme.css     ← CSS khusus warna/tema UI Provinsi.
+│     │  └─ desa_theme.css     ← CSS khusus warna/tema UI Desa.
+│     ├─ js/
+│     │  ├─ sweetalert2.all.min.js ← Mesin popup interaktif.
+│     │  ├─ main.js            ← Logika JS global (Menyuntikkan CSRF token otomatis ke AJAX).
+│     │  └─ form_validator.js  ← Validasi input form secara real-time di sisi klien.
+│     └─ tenants/              ← PENYIMPANAN FILE UPLOAD TERISOLASI
+│        ├─ {id_desa}/         ← File diakses via script PHP, bukan URL langsung.
+│        └─ {id_kabupaten}/
+│
+├─ app/                        ← LOGIKA INTI CORE
+│  ├─ Core/                    ← JANTUNG SISTEM (Framework Custom Murni)
+│  │  ├─ App.php               ← Inisialisasi sistem, memuat env, dan mengatur timezone.
+│  │  ├─ Router.php            ← Mendeteksi subdomain dan memanggil Core terkait.
+│  │  ├─ Database.php          ← PDO PostgreSQL: Handler koneksi & eksekutor pergantian Schema.
+│  │  ├─ Security.php          ← Sanitizer XSS tingkat lanjut.
+│  │  ├─ IntrusionDetector.php ← Penganalisa anomali URL (Path Traversal, Brute Force otomatis).
+│  │  ├─ AuditEngine.php       ← Pencatat log dengan Cryptographic Hash (Immutable Log).
+│  │  ├─ Tenant.php            ← Resolusi otorisasi: Pengecekan pendaftaran subdomain.
+│  │  ├─ CSRF.php              ← Generator token anti-pemalsuan request form.
+│  │  ├─ Validator.php         ← Mesin validasi input sisi server.
+│  │  └─ Logger.php            ← Pencatat error sistem internal.
+│  │
+│  ├─ Identity/                ← AUTENTIKASI & MANAJEMEN IDENTITAS
+│  │  ├─ Auth.php              ← Handler login utama, manajemen Secure & HttpOnly Cookies.
+│  │  ├─ MFA.php               ← Modul Multi-Factor Authentication (OTP / Google Authenticator).
+│  │  ├─ PasswordPolicy.php    ← Pengecek kerumitan password, histori, dan masa aktif.
+│  │  ├─ SessionManager.php    ← Manajemen sesi (Otomatis membunuh sesi lama jika password diganti).
+│  │  └─ GovSSO.php            ← Konektor OAuth2 untuk integrasi dengan SSO Pemerintah Pusat.
+│  │
+│  ├─ Protocols/               ← PROTOKOL VALIDASI (TOP-DOWN)
+│  │  └─ ProvinsiValidator.php ← Memvalidasi request hierarki dari ProvCore.
+│  │
+│  ├─ Controllers/             ← LOGIKA SUPER ADMIN
+│  │  ├─ AuthController.php    ← Login untuk pengelola pusat Core.
+│  │  ├─ DashboardController.php ← Tampilan status server, jumlah tenant aktif.
+│  │  └─ SecurityPanelController.php ← Dashboard khusus pantauan intrusi dan log audit.
+│  │
+│  ├─ Models/                  ← AKSES DATA GLOBAL (SKEMA PUBLIC)
+│  │  ├─ SuperAdminModel.php   ← Akun root Core.
+│  │  ├─ TenantMasterModel.php ← Registri daftar wilayah (ID, Nama, Subdomain, Status Aktif).
+│  │  ├─ ImmutableLogModel.php ← Menyimpan jejak aktivitas (Hanya menolak UPDATE/DELETE).
+│  │  └─ BlockedIPModel.php    ← Daftar hitam IP yang otomatis di-ban oleh server.
+│  │
+│  ├─ Services/                ← LAYANAN SUPERVISI
+│  │  ├─ QuotaManager.php      ← Membatasi penggunaan storage atau API per tenant.
+│  │  ├─ SIEMForwarder.php     ← Pengirim log keamanan ke server eksternal (Wazuh/Splunk).
+│  │  ├─ AlertEngine.php       ← Mesin pengirim peringatan via Telegram/Email jika ada intrusi.
+│  │  └─ SecretsManager.php    ← Jembatan pembaca file .env dengan aman.
+│  │
+│  ├─ Middleware/              ← FILTER SEBELUM CONTROLLER DIEKSEKUSI
+│  │  ├─ RateLimiterMiddleware.php ← Mencegah spam klik/API (Throttling).
+│  │  ├─ SecurityHeadersMiddleware.php ← Menyuntikkan header HSTS, CSP, X-Frame-Options.
+│  │  └─ AuditMiddleware.php   ← Mencatat URL dan IP pengakses ke sistem Audit.
+│  │
+│  └─ Helpers/                 ← FUNGSI GLOBAL PRAKTIS
+│     ├─ esc.php               ← Fungsi pencegah XSS di View.
+│     ├─ crypto.php            ← Wrapper Libsodium untuk tokenisasi & dekripsi sederhana.
+│     └─ format.php            ← Pemformatan Rupiah dan format Tanggal Indonesia.
+│
+├─ config/                     ← KONFIGURASI SISTEM SENTRAL
+│  ├─ app.php                  ← Mode (Production/Development), zona waktu.
+│  ├─ database.php             ← Kredensial DB PostgreSQL utama.
+│  ├─ security.php             ← Aturan MFA, pembatasan gagal login, durasi cookie.
+│  └─ privacy.php              ← Aturan retensi data (Kepatuhan UU PDP).
+│
+├─ storage/                    ← DATA NON-PUBLIK
+│  ├─ backups/                 ← Script auto-backup DB yang terenkripsi.
+│  ├─ logs/                    ← File teks log error aplikasi.
+│  └─ cache/                   ← File cache internal sistem.
+│
+├─ bootstrap.php               ← AUTOLOADER KUSTOM: Memuat file PHP otomatis pengganti Composer.
+└─ .env                        ← RAHASIA: Password DB, Secret Key Libsodium.
+
+
+================================================================================
+2. PROV (LEVEL PROVINSI - AGREGASI & PEMANTAUAN TERTINGGI)
+================================================================================
+prov/
+├─ app/
+│  ├─ Protocols/
+│  │  ├─ AskCore.php       ← Upstream: Minta izin akses database Provinsi ke Core.
+│  │  └─ KabupatenValidator.php  ← Downstream: Memvalidasi keabsahan akses dari KabCore.
+│  │
+│  ├─ Security/
+│  │  ├─ RBACEngine.php          ← Hak akses spesifik (Gubernur, Kepala Dinas, Auditor).
+│  │  ├─ CryptoEngine.php        ← Dekripsi aman untuk membaca agregat data sensitif.
+│  │  └─ DataMasking.php         ← Penyamaran data publik tingkat provinsi.
+│  │
+│  ├─ Controllers/
+│  │  ├─ PortalProvController.php      ← Merender web portal publik Provinsi.
+│  │  ├─ DashboardProvController.php   ← Dashboard pemantauan utama Gubernur.
+│  │  ├─ PetaBencanaProvController.php ← Menampilkan sebaran bencana se-provinsi.
+│  │  ├─ StatistikKeuanganController.php ← Menampilkan agregat transparansi dana desa.
+│  │  └─ AuditLogProvController.php    ← Panel Inspektorat Provinsi untuk melihat riwayat aktivitas.
+│  │
+│  ├─ Models/
+│  │  ├─ AgregatPendudukModel.php      ← Query pembacaan super cepat ke Materialized Views.
+│  │  ├─ RekapBencanaModel.php         ← Menarik data bencana yang berstatus "Validated".
+│  │  ├─ PeringkatKinerjaModel.php     ← Metrik transparansi dan respon tiap kabupaten.
+│  │  └─ ActivityLogModel.php          ← Log aktivitas khusus admin tingkat provinsi.
+│  │
+│  ├─ Services/
+│  │  ├─ AgregasiDataService.php       ← Logika berat mengkalkulasi tren dan persentase dari ribuan desa.
+│  │  ├─ CacheManagerService.php       ← Membuat cache agar web publik provinsi tidak membebani database.
+│  │  ├─ AuditTrailService.php         ← Mengirim log perubahan ke Immutable Log Core.
+│  │  └─ DataPrivacyService.php        ← Modul anonimisasi data sesuai UU PDP.
+│  │
+│  └─ Views/
+│     ├─ portal/
+│     │  ├─ index.php                  ← Beranda publik provinsi.
+│     │  └─ statistik_publik.php       ← Infografis agregat.
+│     └─ dashboard/
+│        ├─ overview.php               ← Dashboard admin provinsi.
+│        ├─ laporan_bencana_prov.php   ← Tabel rekapitulasi data bencana skala provinsi.
+│        └─ audit_trail.php            ← Tampilan tabel log aktivitas.
+
+
+================================================================================
+3. KAB (LEVEL KABUPATEN - OTORITAS TANDA TANGAN DIGITAL)
+================================================================================
+kab/
+├─ app/
+│  ├─ Protocols/
+│  │  ├─ AskProvCore.php         ← Upstream: Minta izin akses database Kabupaten ke ProvCore.
+│  │  └─ KecamatanValidator.php  ← Downstream: Memvalidasi keabsahan akses dari KecCore.
+│  │
+│  ├─ Security/
+│  │  ├─ RBACEngine.php          ← Hak akses Bupati, BPBD, Dinas Sosial.
+│  │  ├─ CryptoEngine.php        ← Enkripsi & Dekripsi data.
+│  │  └─ DataMasking.php
+│  │
+│  ├─ Controllers/
+│  │  ├─ PortalKabController.php       ← Merender web portal publik Kabupaten.
+│  │  ├─ DashboardKabController.php    ← Dashboard admin tingkat Kabupaten.
+│  │  ├─ ValidasiBencanaController.php ← Otoritas ACC akhir untuk logistik bencana.
+│  │  ├─ ValidasiBansosController.php  ← Otoritas ACC akhir penerima bansos (Pencegah duplikasi NIK lintas kecamatan).
+│  │  └─ AuditLogKabController.php     ← Panel pemantauan aktivitas admin kabupaten & kecamatan.
+│  │
+│  ├─ Models/
+│  │  ├─ ValidasiLogModel.php          ← Menyimpan catatan kapan & IP siapa saat tombol Validasi ditekan.
+│  │  ├─ DataKabupatenModel.php        ← Query data khusus wilayah kabupaten terkait.
+│  │  ├─ TindakLanjutModel.php         ← Status pengiriman bantuan/logistik.
+│  │  └─ ActivityLogModel.php
+│  │
+│  ├─ Services/
+│  │  ├─ DigitalSignatureService.php   ← Jantung Keamanan KabCore: Generate hash Libsodium untuk mengunci persetujuan.
+│  │  ├─ DistribusiLogistikService.php ← Algoritma alokasi kuota bantuan.
+│  │  ├─ AuditTrailService.php
+│  │  └─ DataPrivacyService.php
+│  │
+│  └─ Views/
+│     ├─ portal/
+│     │  └─ index.php
+│     └─ dashboard/
+│        ├─ form_validasi_bencana.php  ← Tampilan persetujuan akhir dengan input PIN untuk Tanda Tangan Digital.
+│        ├─ monitor_kecamatan.php      ← Pantauan antrean validasi dari kecamatan.
+│        └─ audit_trail.php
+
+
+================================================================================
+4. KECCORE (LEVEL KECAMATAN - GATEKEEPER MAKER-CHECKER)
+================================================================================
+kec/
+├─ app/
+│  ├─ Protocols/
+│  │  ├─ AskKabCore.php          ← Upstream: Minta izin akses database Kecamatan ke KabCore.
+│  │  └─ DesaValidator.php       ← Downstream: Gatekeeper mutlak untuk memvalidasi akses dari DesaCore.
+│  │
+│  ├─ Security/
+│  │  ├─ RBACEngine.php          ← Hak akses Camat, Kasi Pem, Kasi Kesra.
+│  │  ├─ CryptoEngine.php
+│  │  └─ DataMasking.php
+│  │
+│  ├─ Controllers/
+│  │  ├─ PortalKecController.php       ← Merender web portal publik Kecamatan.
+│  │  ├─ DashboardKecController.php    ← Dashboard admin Kecamatan.
+│  │  ├─ VerifikasiDesaController.php  ← Pemeriksa keabsahan laporan desa (Tolak/Terima).
+│  │  ├─ MonevDesaController.php       ← Monitoring dan Evaluasi kinerja input data desa.
+│  │  └─ AuditLogKecController.php     ← Panel riwayat aktivitas staf kecamatan.
+│  │
+│  ├─ Models/
+│  │  ├─ VerifikasiModel.php           ← Mengelola perubahan status (Draft -> Verified).
+│  │  ├─ KinerjaDesaModel.php          ← Mengambil data keterlambatan laporan desa.
+│  │  └─ ActivityLogModel.php
+│  │
+│  ├─ Services/
+│  │  ├─ DokumenReviewService.php      ← Logika penyiapan layar split (Split-screen) membandingkan data teks dan foto bukti.
+│  │  ├─ NotifikasiHierarkiService.php ← Mengirim pesan otomatis ke dashboard desa jika berkas ditolak.
+│  │  ├─ AuditTrailService.php
+│  │  └─ DataPrivacyService.php
+│  │
+│  └─ Views/
+│     ├─ portal/
+│     │  └─ index.php
+│     └─ dashboard/
+│        ├─ antrean_verifikasi.php     ← List dokumen dari desa yang menunggu diperiksa.
+│        ├─ review_detail.php          ← UI Split-screen dengan tombol Tolak/Terima.
+│        └─ audit_trail.php
+
+
+================================================================================
+5. DESA (LEVEL DESA - SUMBER INPUT DATA UTAMA)
+================================================================================
+desa/
+├─ app/
+│  ├─ Protocols/
+│  │  ├─ AskKecCore.php          ← Upstream: Wajib minta izin akses database Desa ke KecCore.
+│  │  └─ DownstreamValidator.php ← (Dikosongkan/Tidak digunakan karena Desa adalah entitas terbawah).
+│  │
+│  ├─ Security/
+│  │  ├─ RBACEngine.php          ← Hak akses Kades, Sekdes, perangkat desa lainnya.
+│  │  ├─ CryptoEngine.php        ← Mengenkripsi NIK dan data sensitif warga secara fisik di database.
+│  │  └─ DataMasking.php
+│  │
+│  ├─ Controllers/
+│  │  ├─ PortalDesaController.php      ← Merender web profil desa dan publikasi statistik.
+│  │  ├─ PendudukController.php        ← Modul CRUD Data Warga.
+│  │  ├─ LaporBencanaController.php    ← Modul penginputan lokasi bencana dan unggah bukti.
+│  │  ├─ BansosController.php          ← Modul usulan nama warga penerima bantuan.
+│  │  ├─ APBDesController.php          ← Modul input transparansi anggaran keuangan desa.
+│  │  └─ AuditLogDesaController.php    ← Panel Kades untuk mengawasi aktivitas edit data oleh perangkat desa.
+│  │
+│  ├─ Models/
+│  │  ├─ PendudukModel.php             ← Query eksekusi CRUD Warga di dalam skema desa terkait.
+│  │  ├─ LaporanBencanaModel.php
+│  │  ├─ APBDesModel.php
+│  │  ├─ FileTrackerModel.php          ← Menyimpan hash file gambar untuk mencegah modifikasi file (Anti-Tampering).
+│  │  └─ ActivityLogModel.php
+│  │
+│  ├─ Services/
+│  │  ├─ SecureUploadService.php       ← Filter paling ketat: validasi MIME asli, buang EXIF, blokir file executable.
+│  │  ├─ AntiXSSService.php            ← Pembersih input form teks tingkat lanjut.
+│  │  ├─ QRCodeService.php             ← Pembuat QR Code untuk legalitas surat keterangan.
+│  │  ├─ AuditTrailService.php
+│  │  └─ DataPrivacyService.php
+│  │
+│  └─ Views/
+│     ├─ portal/
+│     │  ├─ index.php                  ← Beranda publik desa.
+│     │  └─ transparansi.php           ← Infografis uang masuk/keluar desa.
+│     └─ dashboard/
+│        ├─ form_penduduk.php          ← Form kompleks input warga dengan validasi instan.
+│        ├─ form_bencana.php           ← Form pelaporan dengan drag-and-drop foto.
+│        ├─ kelola_apbdes.php          ← Tabel dinamis input angka APBDes.
+│        └─ audit_trail.php
+

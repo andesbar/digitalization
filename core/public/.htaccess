@@ -1,0 +1,8 @@
+# core/public/.htaccess
+Options -Indexes
+RewriteEngine On
+
+# Jika file atau folder tidak ada, arahkan semua ke index.php
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ index.php [L]

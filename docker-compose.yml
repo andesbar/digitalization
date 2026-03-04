@@ -1,6 +1,6 @@
 services:
   # DATABASE (Postgres)
-  db-desa:
+  db-mega-project:
     image: postgres:latest
     container_name: postgres_container_megaproject
     restart: always
@@ -15,7 +15,7 @@ services:
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
 
   # WEB SERVER (PHP)
-  web-desa:
+  web-mega-project:
     build: .
     container_name: php_container_megaproject
     restart: always
@@ -29,4 +29,4 @@ services:
       - ./localhost+3.pem:/etc/apache2/ssl/cert.pem
       - ./localhost+3-key.pem:/etc/apache2/ssl/key.pem
     depends_on:
-      - db-desa
+      - db-mega-project
