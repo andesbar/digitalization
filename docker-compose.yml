@@ -1,32 +1,32 @@
 services:
-  # DATABASE (Postgres)
-  db-mega-project:
+  # DATABASE (Postgres - DIGITALIZATION)
+  db-digitalization:
     image: postgres:latest
-    container_name: postgres_container_megaproject
+    container_name: postgres_digitalization
     restart: always
     environment:
-      POSTGRES_USER: mega_admin
-      POSTGRES_PASSWORD: Megadmin
-      POSTGRES_DB: mega_db
+      POSTGRES_USER: mega_admin     # Tetap mega_admin sesuai instruksi
+      POSTGRES_PASSWORD: Megadmin  # Tetap Megadmin sesuai instruksi
+      POSTGRES_DB: mega_db          # Tetap mega_db sesuai instruksi
     ports:
       - "5432:5432"
     volumes:
       - ./data_db:/var/lib/postgresql
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
 
-  # WEB SERVER (PHP)
-  web-mega-project:
+  # WEB SERVER (PHP - DIGITALIZATION)
+  web-digitalization:
     build: .
-    container_name: php_container_megaproject
+    container_name: php_digitalization
     restart: always
     ports:
       - "80:80"
-      - "443:443" # Pintu baru untuk HTTPS
+      - "443:443" # Pintu masuk SSL/HTTPS
     volumes:
       - .:/var/www/html
       - ./docker-config/vhost.conf:/etc/apache2/sites-available/000-default.conf
-      # Memasukkan sertifikat ke dalam folder SSL di Apache
+      # Sertifikat SSL
       - ./localhost+3.pem:/etc/apache2/ssl/cert.pem
       - ./localhost+3-key.pem:/etc/apache2/ssl/key.pem
     depends_on:
-      - db-mega-project
+      - db-digitalization
